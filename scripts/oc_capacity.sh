@@ -3,6 +3,12 @@
 # fixed constant: the answer follows the current cores, free memory, and what the agents do.
 set -euo pipefail
 
+# Machine-local defaults (tier-to-model bindings, the shared cap) live outside this repository
+# so nothing here assumes a provider's lineup. The file is optional.
+ENV_FILE=${AGENT_ORCHESTRATION_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-orchestration.env}
+# shellcheck source=/dev/null
+[ -f "$ENV_FILE" ] && . "$ENV_FILE"
+
 usage() {
   cat <<'EOF'
 Usage: oc_capacity.sh [light|medium|heavy] [--per-agent-mb N]

@@ -49,11 +49,15 @@ opencode models | head                            # models this config can actua
 The last one matters: a model listed in the config is not necessarily served by the account
 behind it, and the failure arrives as a 404 several seconds into a paid dispatch.
 
-Agents from other sessions share this machine and this quota. The registry lists them,
-`oc_capacity.sh` subtracts them, and `oc_agent.sh` holds a slot lock for the whole run, so
-`OPENCODE_MAX_AGENTS` (default 5) holds between sessions that use this wrapper. An idle opencode
-TUI and the wrapper's own child process are never counted. The registry is separate from the
-codex one, so if both toolkits are in use, check both.
+Agents from other sessions share this machine and this quota, and so does the sibling codex
+toolkit. The cap is therefore shared: both wrappers lock the same slot directory and both
+counters read both registries, so `AGENT_MAX_AGENTS` (default 5) is the total across engines, not
+5 each. `oc_agents.sh --list` shows every agent on the machine whichever toolkit started it. An
+idle opencode TUI and the wrapper's own child process are never counted.
+
+Machine-local settings — the cap and the tier-to-model bindings — live in
+`${XDG_CONFIG_HOME:-~/.config}/agent-orchestration.env`, which both wrappers source when it
+exists. Nothing about a provider's lineup belongs in this repository.
 
 ## When not to use this
 
@@ -143,15 +147,28 @@ integration — with shared surface (build files, config, `conftest.py`) as the 
 | `standard` | `medium` | default: a contained feature, docs, tests for one module | 900–1800 |
 | `deep` | `high` | changes across several files, non-obvious bugs, refactors | 1800–3600 |
 | `frontier` | `xhigh` | architecture, concurrency, performance, vague requirements | 3600–7200 |
+| `max` | `max` | one problem a `frontier` agent already failed twice; never a default | 7200+ |
 
 A tier always sets the variant, and sets the model only when `OPENCODE_TIER_<TIER>_MODEL` is
-exported. `--model provider/model` and `--variant` override it for one agent.
+exported. Both halves matter: the variant decides how long it thinks, the model decides what a
+token costs, and most of a run belongs on the cheap end of both. `--model provider/model` and
+`--variant` override a tier for one agent, and `--agent <preset>` carries a whole role — model,
+temperature, tools, permissions — in one name.
 
-| `--permission` | grants | use for |
-|----------------|--------|---------|
-| `read-only` | reading tools plus an allowlist of inspection commands; no edits | research, audits, review |
-| `workspace-write` | edits, plus bash minus destructive and history-changing git | all implementation |
-| `full` | everything | never without the user's explicit approval |
+| `--permission` | agent mode | grants | use for |
+|----------------|------------|--------|---------|
+| `read-only` | `plan` | reading tools plus an allowlist of inspection commands; the write tools are absent | research, audits, review |
+| `workspace-write` | `build` | edits, plus bash minus destructive and history-changing git | all implementation |
+| `full` | `build` | everything | never without the user's explicit approval |
+
+The agent mode is the second boundary and the stronger one. `plan` has no write, edit, or patch
+tool at all: measured with `edit: allow` in force, a plan agent still could not modify a file and
+reported that it was blocked. `--agent` overrides the default when a named preset fits better.
+
+Nothing in a profile may resolve to `ask`. opencode defaults `doom_loop` and `external_directory`
+to ask, and either one would stop a non-interactive run dead until the timeout; the wrapper pins
+them — `doom_loop` denied so a suspected runaway stops, `external_directory` allowed so a spec
+can point a worker at a skill file outside the workspace.
 
 `--network` allows webfetch, which is denied by default in every profile. `--allow-git` removes
 the git denials and needs a reason. **Never configure `ask` in a profile** — a non-interactive

@@ -76,7 +76,12 @@ Every script documents its options under `--help`.
 |---|---|---|
 | `read-only` | reading tools plus an allowlist of inspection commands | research, audits, review |
 | `workspace-write` | edits, and bash minus destructive and history-changing git | implementation |
-| `full` | everything | never without explicit approval |
+| `full` | everything except history-changing git | never without explicit approval |
+| `bypass` | everything, git included, plus `--auto` | only in a workspace you would hand a shell to |
+
+`bypass` prints a warning and is never a default. Named presets carry a whole role instead:
+`--agent <name>` uses an agent defined in `~/.config/opencode/agent/<name>.md`, which fixes the
+model, temperature, tools, and permissions in one place.
 
 `--network` allows webfetch, denied by default. `--allow-git` removes the git denials. A profile
 must never contain `ask`: a non-interactive run has nobody to answer it and hangs until the

@@ -66,7 +66,10 @@ scripts/oc_merge.sh --run-dir "$RUN" --repo /path/to/repo --into main --check "p
 |---|---|---|
 | `read-only` | 讀取類工具，加上一組檢視命令的允許清單 | 研究、稽核、審查 |
 | `workspace-write` | 可編輯，bash 扣除破壞性命令與改寫歷史的 git | 實作 |
-| `full` | 不受限 | 未取得明確同意即不使用 |
+| `full` | 除改寫歷史的 git 之外全部允許 | 未取得明確同意即不使用 |
+| `bypass` | 全部允許，含 git，並加上 `--auto` | 只用於你願意直接給出 shell 的工作區 |
+
+`bypass` 會印出警告，永遠不是預設值。具名預設則承載完整角色：`--agent <name>` 使用 `~/.config/opencode/agent/<name>.md` 定義的代理，把模型、溫度、可用工具與權限固定在同一處。
 
 `--network` 開放 webfetch，預設關閉；`--allow-git` 解除 git 禁令。設定檔中絕不可出現 `ask`，因為非互動執行沒有人能回答，會一直等到時限結束。權限透過 `OPENCODE_CONFIG_CONTENT` 合併進使用者設定，因此供應商、模型與 MCP 伺服器維持不變，只有這次執行的邊界改變。
 

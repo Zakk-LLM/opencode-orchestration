@@ -7,6 +7,12 @@ set -uo pipefail
 
 REG=${OPENCODE_REGISTRY_DIR:-${XDG_RUNTIME_DIR:-/tmp}/opencode-agents}
 
+# Machine-local defaults (tier-to-model bindings, the shared cap) live outside this repository
+# so nothing here assumes a provider's lineup. The file is optional.
+ENV_FILE=${AGENT_ORCHESTRATION_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-orchestration.env}
+# shellcheck source=/dev/null
+[ -f "$ENV_FILE" ] && . "$ENV_FILE"
+
 usage() {
   cat <<'EOF'
 Usage: oc_agents.sh [--list | --count | --prune | --slots]
@@ -44,7 +50,7 @@ PY
     rm -f "$REG/${2:?pid}.json" ;;
   --count|--list|--prune|--slots)
     ACTION=$1
-    python3 - "$REG" "$ACTION" "${OPENCODE_MAX_AGENTS:-5}" <<'PY'
+    python3 - "$REG" "$ACTION" "${AGENT_MAX_AGENTS:-${OPENCODE_MAX_AGENTS:-5}}" <<'PY'
 import json, os, pathlib, sys, time
 reg, action, cap = pathlib.Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
 
@@ -88,9 +94,14 @@ def scan_unregistered(known):
         except OSError:
             continue
         argv = [a.decode(errors="replace") for a in argv]
-        # Only a non-interactive `opencode run` counts; the TUI is a different process shape.
+        # Both engines count: `codex exec` (alias `e`) and `opencode run`. Anything else with
+        # that name is a TUI or an unrelated program.
+        if not argv:            # kernel threads have an empty cmdline
+            continue
         sub = next((a for a in argv[1:] if not a.startswith("-")), None)
-        if not argv or os.path.basename(argv[0]) != "opencode" or sub != "run":
+        engine = os.path.basename(argv[0])
+        if not ((engine == "codex" and sub in ("exec", "e"))
+                or (engine == "opencode" and sub == "run")):
             continue
         pid = int(entry.name)
         if state(pid) in (None, "Z") or descends_from(pid, known):
@@ -101,8 +112,16 @@ def scan_unregistered(known):
                       "run_dir": "(started outside this wrapper)", "registered_at": None})
     return found
 
+# One machine, one quota: a sibling toolkit's agents count against the same cap.
+registries = [reg]
+runtime = reg.parent
+for name in ("codex-agents", "opencode-agents"):
+    other = runtime / name
+    if other != reg and other.is_dir():
+        registries.append(other)
+
 live, stale = [], []
-for f in sorted(reg.glob("*.json")):
+for f in sorted(f for r in registries for f in r.glob("*.json")):
     try:
         d = json.loads(f.read_text())
     except (json.JSONDecodeError, OSError):

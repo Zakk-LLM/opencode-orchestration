@@ -20,16 +20,18 @@ Workspace:
   --allow-stale-base start a worktree from a base that is behind its upstream
 
 Model and limits:
-  --tier NAME        difficulty tier: cheap|standard|deep|frontier
+  --tier NAME        difficulty tier: cheap|standard|deep|frontier|max
                      Sets the variant, and the model when OPENCODE_TIER_<NAME>_MODEL is set.
   --variant LEVEL    provider reasoning effort, e.g. low|medium|high|xhigh|max
   --model NAME       provider/model override
-  --agent NAME       opencode agent preset from the user's config
+  --agent NAME       opencode agent preset; defaults to plan for read-only and build otherwise
   --timeout SEC      hard wall-clock limit                   (default: 1800)
   --stall SEC        kill when no event arrives for this long (default: off)
 
 Permissions (opencode has no sandbox; these are its equivalent):
-  --permission MODE  read-only|workspace-write|full          (default: read-only)
+  --permission MODE  read-only|workspace-write|full|bypass   (default: read-only)
+                     bypass allows everything including git history commands and adds --auto.
+                     Dangerous, never a default.
   --network          allow webfetch
   --allow-git        do not deny history-changing git commands (dangerous, off by default)
 
@@ -50,6 +52,15 @@ SCHEMA=; TIER=; PERMISSION=read-only; NETWORK=0; ALLOW_GIT=0; ADMISSION=wait
 WORKTREE=; WORKTREE_BASE=HEAD; ALLOW_STALE=0
 HERE=$(cd "$(dirname "$0")" && pwd)
 REG=${OPENCODE_REGISTRY_DIR:-${XDG_RUNTIME_DIR:-/tmp}/opencode-agents}
+
+# Machine-local defaults (tier-to-model bindings, the shared cap) live outside this repository
+# so nothing here assumes a provider's lineup. The file is optional.
+ENV_FILE=${AGENT_ORCHESTRATION_ENV:-${XDG_CONFIG_HOME:-$HOME/.config}/agent-orchestration.env}
+# shellcheck source=/dev/null
+[ -f "$ENV_FILE" ] && . "$ENV_FILE"
+# Both orchestration toolkits share one machine and one quota, so they share one slot
+# directory and one cap. Engine-specific variables still work, but the shared one wins.
+SLOTS=${AGENT_SLOTS_DIR:-${XDG_RUNTIME_DIR:-/tmp}/agent-slots}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -87,7 +98,8 @@ if [ -n "$TIER" ]; then
     standard) TIER_VARIANT=medium ;;
     deep)     TIER_VARIANT=high ;;
     frontier) TIER_VARIANT=xhigh ;;
-    *) echo "bad --tier: $TIER (cheap|standard|deep|frontier)" >&2; exit 2 ;;
+    max)      TIER_VARIANT=max ;;
+    *) echo "bad --tier: $TIER (cheap|standard|deep|frontier|max)" >&2; exit 2 ;;
   esac
   [ "$VARIANT_SET" = 1 ] || VARIANT=$TIER_VARIANT
   if [ -z "$MODEL" ]; then
@@ -98,7 +110,9 @@ fi
 
 [ -n "$RUN_DIR" ] && [ -n "$LABEL" ] || { echo "--run-dir and --label are required" >&2; exit 2; }
 [ -n "$PROMPT_FILE" ] || [ -n "$PROMPT_TEXT" ] || { echo "--prompt-file or --prompt is required" >&2; exit 2; }
-case "$PERMISSION" in read-only|workspace-write|full) ;; *) echo "bad --permission: $PERMISSION" >&2; exit 2 ;; esac
+case "$PERMISSION" in read-only|workspace-write|full|bypass) ;;
+  *) echo "bad --permission: $PERMISSION" >&2; exit 2 ;; esac
+[ "$PERMISSION" = bypass ] && echo "WARNING: $LABEL runs with every permission allowed" >&2
 case "$ADMISSION" in wait|refuse|off) ;; *) echo "bad --admission: $ADMISSION (wait|refuse|off)" >&2; exit 2 ;; esac
 case "$LABEL" in */*|.|..) echo "invalid label: $LABEL (no path separators)" >&2; exit 2 ;; esac
 
@@ -115,6 +129,16 @@ fi
 # opencode has no sandbox: permission rules are the boundary, and they are merged into the
 # user's config for this run only. "ask" must never appear — a non-interactive run would hang
 # waiting for an answer nobody can give.
+# plan mode removes the write tools entirely, which is a stronger boundary than any permission
+# rule: measured with edit:allow in force, a plan agent still could not modify a file. Using it
+# for read-only work means two independent boundaries instead of one.
+if [ -z "$AGENT" ]; then
+  case "$PERMISSION" in
+    read-only) AGENT=plan ;;
+    *) AGENT=build ;;
+  esac
+fi
+
 PERM_JSON=$(PERMISSION="$PERMISSION" NETWORK="$NETWORK" ALLOW_GIT="$ALLOW_GIT" python3 -c '
 import json, os
 mode, network, allow_git = os.environ["PERMISSION"], os.environ["NETWORK"], os.environ["ALLOW_GIT"]
@@ -139,8 +163,16 @@ elif mode == "workspace-write":
         bash.update(GIT_DENY)
     perm = {"edit": "allow", "bash": bash}
 else:
+    # full and bypass both allow everything; bypass additionally drops the git denials, which
+    # `full` keeps because the orchestrator still owns commits.
     perm = {"edit": "allow", "bash": {"*": "allow"}}
+    if mode == "full" and allow_git != "1":
+        perm["bash"].update(GIT_DENY)
 perm["webfetch"] = "allow" if network == "1" else "deny"
+# Nothing may resolve to "ask": a non-interactive run has nobody to answer, and the agent would
+# sit until the timeout kills it. These two default to ask in opencode.
+perm["doom_loop"] = "deny"          # a suspected runaway loop stops rather than waiting
+perm["external_directory"] = "allow"  # specs point workers at skill files outside the workspace
 print(json.dumps({"permission": perm}))
 ') || exit 2
 
@@ -195,24 +227,25 @@ ARGS=(run --format json --dir "$CWD")
 [ -n "$MODEL" ] && ARGS+=(-m "$MODEL")
 [ -n "$VARIANT" ] && ARGS+=(--variant "$VARIANT")
 [ -n "$AGENT" ] && ARGS+=(--agent "$AGENT")
+[ "$PERMISSION" = bypass ] && ARGS+=(--auto)
 if [ -n "$RESUME" ]; then
   ARGS+=(-s "$RESUME")
   [ "$FORK" = 1 ] && ARGS+=(--fork)
 fi
 
 if [ "$ADMISSION" != off ]; then
-  mkdir -p "$REG/slots" 2>/dev/null
-  MAXA=${OPENCODE_MAX_AGENTS:-5}
+  mkdir -p "$SLOTS" 2>/dev/null
+  MAXA=${AGENT_MAX_AGENTS:-${OPENCODE_MAX_AGENTS:-5}}
   SLOT_FD=; WAITED=0
   while [ -z "$SLOT_FD" ]; do
     for i in $(seq 1 "$MAXA"); do
-      exec {fd}>"$REG/slots/slot-$i" || continue
+      exec {fd}>"$SLOTS/slot-$i" || continue
       if flock -n "$fd"; then SLOT_FD=$fd; break; fi
       exec {fd}>&-
     done
     [ -n "$SLOT_FD" ] && break
     if [ "$ADMISSION" = refuse ]; then
-      echo "no free agent slot: $MAXA already running machine-wide (OPENCODE_MAX_AGENTS)" >&2
+      echo "no free agent slot: $MAXA already running machine-wide (AGENT_MAX_AGENTS)" >&2
       "$HERE/oc_agents.sh" --list >&2
       exit 3
     fi
