@@ -41,6 +41,15 @@ Specifically, none of these is a reason to accept:
 It writes `verify.json` with the changed files, the files outside scope, and every command with
 its exit code and output tail. Steps 1, 4, and 5 stay manual because they need judgment.
 
+### A worker will claim work it did not do
+
+Measured, not hypothetical: an `inspect` worker asked to run the tests and then edit a file
+reported "Pytest exit code: 0. Edited `m.py` successfully." The tests had run; the edit had not.
+The event log showed no edit tool call at all, and the file was byte-identical. Nothing in the
+report was flagged as uncertain.
+
+This is why the gate compares the report against the diff rather than reading the report.
+
 ## Research and data collection
 
 Sources are part of the claim, not the evidence. Agents do fabricate citations, misattribute

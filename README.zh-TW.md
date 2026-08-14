@@ -62,12 +62,17 @@ scripts/oc_merge.sh --run-dir "$RUN" --repo /path/to/repo --into main --check "p
 
 ## 權限設定檔
 
-| 設定檔 | 授予 | 用於 |
-|---|---|---|
-| `read-only` | 讀取類工具，加上一組檢視命令的允許清單 | 研究、稽核、審查 |
-| `workspace-write` | 可編輯，bash 扣除破壞性命令與改寫歷史的 git | 實作 |
-| `full` | 除改寫歷史的 git 之外全部允許 | 未取得明確同意即不使用 |
-| `bypass` | 全部允許，含 git，並加上 `--auto` | 只用於你願意直接給出 shell 的工作區 |
+| 設定檔 | 代理模式 | 授予 | 用於 |
+|---|---|---|---|
+| `read-only` | `plan` | 讀取類工具與檢視命令，沒有寫入工具 | 讀程式碼、規劃 |
+| `inspect`（預設） | `build` | 除破壞性命令與改寫歷史的 git 外全部命令，edit 被拒絕 | 稽核、審查、跑測試與 linter |
+| `workspace-write` | `build` | 同上命令再加上編輯 | 實作 |
+| `full` | `build` | 除改寫歷史的 git 外全部允許 | 少用，且需同意 |
+| `bypass` | `build` | 全部允許，含 git，並加上 `--auto` | 你願意直接給出 shell 的工作區 |
+
+依任務**必須做什麼**選擇，不依聽起來多謹慎。稽核代理若被派成 `read-only`，就無法執行它用來判斷的測試，整輪作廢。這一點實測過兩次：一次是工作代理因 `python3` 被拒而重試 25 分鐘，一次是 `plan` 模式的工作代理即使開放 bash 仍拒絕執行，因為它自己的提示說規劃模式不執行命令。`--allow-cmd PATTERN` 可為任一設定檔單獨開放一條命令。
+
+`inspect` 拒絕的是 edit 工具，不是寫入：shell 命令仍可建立檔案，因此審查閘門比對實際改動檔案與宣告範圍，而不是信任設定檔。opencode 沒有沙箱，任何設定檔都不是隔離邊界。
 
 `bypass` 會印出警告，永遠不是預設值。具名預設則承載完整角色：`--agent <name>` 使用 `~/.config/opencode/agent/<name>.md` 定義的代理，把模型、溫度、可用工具與權限固定在同一處。
 

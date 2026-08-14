@@ -160,9 +160,27 @@ temperature, tools, permissions — in one name.
 
 | `--permission` | agent mode | grants | use for |
 |----------------|------------|--------|---------|
-| `read-only` | `plan` | reading tools plus an allowlist of inspection commands; the write tools are absent | research, audits, review |
-| `workspace-write` | `build` | edits, plus bash minus destructive and history-changing git | all implementation |
-| `full` | `build` | everything | never without the user's explicit approval |
+| `read-only` | `plan` | reading tools and inspection commands only; no write tool exists | reading code, answering questions, planning |
+| `inspect` (default) | `build` | every command except destructive and history-changing git; the edit tool is denied | audits, reviews, running tests and linters |
+| `workspace-write` | `build` | the same commands, plus editing | all implementation |
+| `full` | `build` | everything except history-changing git | rare, and only with the user's approval |
+| `bypass` | `build` | everything, git included, plus `--auto` | a workspace you would hand a shell to |
+
+Pick by what the task must *do*, not by how cautious it sounds. The mistake this table exists to
+prevent: an auditor dispatched `read-only` cannot run the tests it is judging by, and the run is
+wasted. Measured twice — a `read-only` worker denied `python3` spent 25 minutes retrying, and a
+`plan`-mode worker with bash allowed still refused, answering "not run in plan mode" because its
+own prompt tells it planning does not execute. `inspect` exists for exactly that job.
+
+Two honest limits. First, `inspect` denies the *edit tool*, not writing: a shell command can
+still create a file, which is why the review gate compares the changed files against the
+declared scope instead of trusting the profile. Second, opencode has no sandbox at all, so none
+of these is a containment boundary — on codex, `--sandbox read-only` blocks writes in the kernel
+while still letting commands run, and that guarantee has no equivalent here.
+
+`--allow-cmd PATTERN` adds one more permitted command to any profile, which is the right lever
+when a `read-only` agent needs exactly one tool: `--allow-cmd "python3 */chinese_lint.py*"` beats
+promoting the whole run to `inspect`.
 
 The agent mode is the second boundary and the stronger one. `plan` has no write, edit, or patch
 tool at all: measured with `edit: allow` in force, a plan agent still could not modify a file and

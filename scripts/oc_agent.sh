@@ -29,11 +29,16 @@ Model and limits:
   --stall SEC        kill when no event arrives for this long (default: off)
 
 Permissions (opencode has no sandbox; these are its equivalent):
-  --permission MODE  read-only|workspace-write|full|bypass   (default: read-only)
+  --permission MODE  read-only|inspect|workspace-write|full|bypass  (default: inspect)
+                     inspect runs commands but has no edit tool: the profile for auditing,
+                     testing, and linting. read-only additionally denies every command that is
+                     not plain inspection.
                      bypass allows everything including git history commands and adds --auto.
                      Dangerous, never a default.
   --network          allow webfetch
   --allow-git        do not deny history-changing git commands (dangerous, off by default)
+  --allow-cmd PAT    allow one more shell pattern in this run, e.g. --allow-cmd "python3 *"
+                     (repeatable; a read-only profile denies everything else by default)
 
 Behavior:
   --schema FILE      JSON Schema the final message must satisfy; validated after the run
@@ -48,7 +53,7 @@ EOF
 
 RUN_DIR=; LABEL=; PROMPT_FILE=; PROMPT_TEXT=; CWD=$PWD
 VARIANT=; VARIANT_SET=0; MODEL=; AGENT=; TIMEOUT=1800; STALL=0; RESUME=; FORK=0
-SCHEMA=; TIER=; PERMISSION=read-only; NETWORK=0; ALLOW_GIT=0; ADMISSION=wait
+SCHEMA=; TIER=; PERMISSION=inspect; NETWORK=0; ALLOW_GIT=0; ADMISSION=wait; ALLOW_CMDS=()
 WORKTREE=; WORKTREE_BASE=HEAD; ALLOW_STALE=0
 HERE=$(cd "$(dirname "$0")" && pwd)
 REG=${OPENCODE_REGISTRY_DIR:-${XDG_RUNTIME_DIR:-/tmp}/opencode-agents}
@@ -83,6 +88,7 @@ while [ $# -gt 0 ]; do
     --permission) PERMISSION=$2; shift 2 ;;
     --network) NETWORK=1; shift ;;
     --allow-git) ALLOW_GIT=1; shift ;;
+    --allow-cmd) ALLOW_CMDS+=("$2"); shift 2 ;;
     --schema) SCHEMA=$2; shift 2 ;;
     --resume) RESUME=$2; shift 2 ;;
     --fork) FORK=1; shift ;;
@@ -110,7 +116,7 @@ fi
 
 [ -n "$RUN_DIR" ] && [ -n "$LABEL" ] || { echo "--run-dir and --label are required" >&2; exit 2; }
 [ -n "$PROMPT_FILE" ] || [ -n "$PROMPT_TEXT" ] || { echo "--prompt-file or --prompt is required" >&2; exit 2; }
-case "$PERMISSION" in read-only|workspace-write|full|bypass) ;;
+case "$PERMISSION" in read-only|inspect|workspace-write|full|bypass) ;;
   *) echo "bad --permission: $PERMISSION" >&2; exit 2 ;; esac
 [ "$PERMISSION" = bypass ] && echo "WARNING: $LABEL runs with every permission allowed" >&2
 case "$ADMISSION" in wait|refuse|off) ;; *) echo "bad --admission: $ADMISSION (wait|refuse|off)" >&2; exit 2 ;; esac
@@ -134,12 +140,17 @@ fi
 # for read-only work means two independent boundaries instead of one.
 if [ -z "$AGENT" ]; then
   case "$PERMISSION" in
+    # plan has no write tool at all, which is what read-only wants. inspect must NOT use it:
+    # measured, a plan agent refuses to run commands because its own prompt says it is a
+    # planning mode, so an auditor there reports "not run" instead of running the tests.
     read-only) AGENT=plan ;;
     *) AGENT=build ;;
   esac
 fi
 
-PERM_JSON=$(PERMISSION="$PERMISSION" NETWORK="$NETWORK" ALLOW_GIT="$ALLOW_GIT" python3 -c '
+ALLOW_CMDS_JSON=$(python3 -c 'import json,sys; json.dump(sys.argv[1:], sys.stdout)' ${ALLOW_CMDS+"${ALLOW_CMDS[@]}"})
+PERM_JSON=$(PERMISSION="$PERMISSION" NETWORK="$NETWORK" ALLOW_GIT="$ALLOW_GIT" \
+            ALLOW_CMDS="$ALLOW_CMDS_JSON" python3 -c '
 import json, os
 mode, network, allow_git = os.environ["PERMISSION"], os.environ["NETWORK"], os.environ["ALLOW_GIT"]
 # History-changing git is denied for the same reason every task spec forbids it: the
@@ -148,13 +159,26 @@ GIT_DENY = {f"git {c}*": "deny" for c in
             ("commit", "push", "rebase", "checkout", "switch", "reset", "merge", "cherry-pick",
              "stash", "tag", "branch -d", "branch -D", "clean")}
 DESTRUCTIVE = {"rm -rf *": "deny", "sudo *": "deny", "shutdown*": "deny", "reboot*": "deny"}
-if mode == "read-only":
+if mode == "inspect":
+    # An auditor has to run the tests and the linter it is judging by. The edit tools are gone
+    # (plan mode) and history-changing git is denied, but bash is bash: a command can still
+    # write a file, so the scope check in the review gate is what actually catches that.
+    bash = {"*": "allow"}
+    bash.update(DESTRUCTIVE)
+    if allow_git != "1":
+        bash.update(GIT_DENY)
+    perm = {"edit": "deny", "bash": bash}
+elif mode == "read-only":
     bash = {"*": "deny"}
     # Reading the repository is the whole job of a read-only agent.
     bash.update({p: "allow" for p in
                  ("ls*", "cat*", "head*", "tail*", "wc*", "file*", "stat*", "find*", "grep*",
-                  "rg*", "sed -n*", "awk*", "git log*", "git show*", "git diff*", "git status*",
-                  "git grep*", "git ls-files*", "git rev-parse*", "git blame*")})
+                  "rg*", "sed -n*", "awk*", "nl*", "sort*", "uniq*", "cut*", "tr *", "diff*",
+                  "jq*", "basename*", "dirname*", "realpath*", "readlink*", "which*", "type *",
+                  "env", "tree*", "du*", "df*", "md5sum*", "sha256sum*",
+                  "git log*", "git show*", "git diff*", "git status*", "git grep*",
+                  "git ls-files*", "git rev-parse*", "git blame*", "git describe*",
+                  "git branch --list*", "git worktree list*")})
     perm = {"edit": "deny", "bash": bash}
 elif mode == "workspace-write":
     bash = {"*": "allow"}
@@ -171,6 +195,9 @@ else:
 perm["webfetch"] = "allow" if network == "1" else "deny"
 # Nothing may resolve to "ask": a non-interactive run has nobody to answer, and the agent would
 # sit until the timeout kills it. These two default to ask in opencode.
+# Anything the orchestrator explicitly allowed for this run, added last so it wins.
+for pattern in json.loads(os.environ.get("ALLOW_CMDS") or "[]"):
+    perm.setdefault("bash", {})[pattern] = "allow"
 perm["doom_loop"] = "deny"          # a suspected runaway loop stops rather than waiting
 perm["external_directory"] = "allow"  # specs point workers at skill files outside the workspace
 print(json.dumps({"permission": perm}))

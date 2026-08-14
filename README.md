@@ -72,12 +72,23 @@ Every script documents its options under `--help`.
 
 ## Permission profiles
 
-| Profile | Grants | Use for |
-|---|---|---|
-| `read-only` | reading tools plus an allowlist of inspection commands | research, audits, review |
-| `workspace-write` | edits, and bash minus destructive and history-changing git | implementation |
-| `full` | everything except history-changing git | never without explicit approval |
-| `bypass` | everything, git included, plus `--auto` | only in a workspace you would hand a shell to |
+| Profile | Agent mode | Grants | Use for |
+|---|---|---|---|
+| `read-only` | `plan` | reading tools and inspection commands; no write tool exists | reading code, planning |
+| `inspect` (default) | `build` | every command except destructive and history-changing git; edit denied | audits, reviews, tests, linters |
+| `workspace-write` | `build` | the same commands, plus editing | implementation |
+| `full` | `build` | everything except history-changing git | rare, with approval |
+| `bypass` | `build` | everything, git included, plus `--auto` | a workspace you would hand a shell to |
+
+Pick by what the task must do. An auditor dispatched `read-only` cannot run the tests it judges
+by, and the run is wasted — measured twice, once as a worker retrying a denied `python3` for 25
+minutes and once as a `plan`-mode worker that refused to run anything because its own prompt says
+planning does not execute. `--allow-cmd PATTERN` adds a single command to any profile when that
+is all a strict agent needs.
+
+`inspect` denies the edit tool, not writing: a shell command can still create a file, so the
+review gate compares changed files against the declared scope rather than trusting the profile.
+opencode has no sandbox, so no profile is a containment boundary.
 
 `bypass` prints a warning and is never a default. Named presets carry a whole role instead:
 `--agent <name>` uses an agent defined in `~/.config/opencode/agent/<name>.md`, which fixes the

@@ -60,6 +60,39 @@ try:
 except (OSError, json.JSONDecodeError):
     seen = {}
 
+def repeated_failure(path, window=40, threshold=8):
+    """A worker can emit events forever while getting nowhere: the same tool failing on the
+    same input is progress to the stall guard and waste to everyone else. Reads the tail only."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as fh:
+            fh.seek(max(0, size - 262144))
+            lines = fh.read().decode(errors="replace").splitlines()
+    except OSError:
+        return None
+    fails = []
+    for line in lines:
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = ev.get("item") or ev.get("part") or {}
+        state = item.get("state") or {}
+        status = state.get("status")
+        exit_code = item.get("exit_code")
+        failed = status == "error" or (exit_code not in (0, None))
+        if item.get("type") in ("tool", "command_execution", "tool_use") or status:
+            key = f"{item.get('tool') or item.get('type')}"
+            fails.append(key if failed else None)
+    recent = [f for f in fails[-window:] if f]
+    if not recent:
+        return None
+    top = max(set(recent), key=recent.count)
+    n = recent.count(top)
+    return (top, n) if n >= threshold else None
+
 agents = [a for a in sorted((run / "agents").glob("*")) if a.is_dir()]
 # A directory holding only a prepared spec has not been dispatched: events.jsonl appears when
 # the worker actually starts. Counting it as running would hide "nothing was dispatched".
@@ -87,6 +120,16 @@ for a in dispatched:
             if key not in seen:
                 seen[key] = "EXPIRING"
                 changed.append((a.name, f"EXPIRING {max(left, 0)}s left of {limit}s", "", ""))
+        # Burning wall-clock without progress: the same tool failing over and over.
+        looping = repeated_failure(a / "events.jsonl")
+        if looping:
+            key = f"{a.name}#loop"
+            if seen.get(key) != looping[0]:
+                seen[key] = looping[0]
+                changed.append((a.name,
+                                f"LOOPING {looping[0]} failed {looping[1]} times in the last 40 "
+                                f"tool calls — interrupt it, the spec cannot fix itself", "", ""))
+
         stall = int(s.get("stall_s") or 0)
         events = a / "events.jsonl"
         if stall and events.exists():
