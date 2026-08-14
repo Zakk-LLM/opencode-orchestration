@@ -68,6 +68,18 @@ dependency chain, where measured results show multi-agent topologies doing subst
 than one agent. Your review capacity, not the worker count, is the limit: about three
 review-bearing agents in flight.
 
+Never dispatched, however large the run:
+
+- **Git mechanics** — the permission profile denies them anyway, and `oc_worktrees.sh --rebase`
+  and `oc_merge.sh` do them in one command.
+- **A fix faster to make than to specify** — a typo, a wrong constant, a one-line guard.
+- **Anything you must verify line by line anyway** — review is the expensive half.
+- **Running a command to read its output** — you can run it directly.
+
+The test is whether a separate context window earns the spec plus the review: the same rename
+across 200 files does, the same rename in three files does not. A dispatched trivial task also
+holds a slot the machine cap counts and puts a review ahead of one that mattered.
+
 ## Workflow
 
 ### 1. Create the run directory
@@ -103,6 +115,13 @@ its dependencies succeed, and is skipped when one fails:
 Unknown labels and cycles are rejected before anything starts. Concurrency comes from
 `oc_capacity.sh light|medium|heavy`. Give every write-capable agent its own `--worktree`.
 
+Order and atomicity are one design. The rule underneath both: work is only ever built on a state
+that exists — a dependency's finished result, or the target's real commit. Dispatching a
+dependent task early is the expensive mistake, because it works against a schema or signature
+that does not exist yet and the whole run is discarded; a failed dependency stops its own subtree
+and nothing else. The same rule reappears at merge time, where a branch whose recorded base is no
+longer an ancestor of the target is rebased or refused rather than merged silently.
+
 ### 3. Write the task spec
 
 One file per agent from [references/prompt-template.md](references/prompt-template.md), with the
@@ -111,7 +130,10 @@ the prohibitions even though the permission profile enforces the git ones: a wor
 why it must not commit reports a blocker instead of hunting for a way around it.
 
 Paste the regression scope from `oc_impact.sh --repo <repo> --format md` rather than letting the
-worker search for it.
+worker search for it: it derives the changed files, the symbols they define, the files
+referencing those symbols, and the covering tests with `git grep`, in seconds and without tokens.
+The economics are fixed — each agent runs the targeted set, the full suite runs once at
+integration — with shared surface (build files, config, `conftest.py`) as the flagged exception.
 
 ### 4. Pick the tier, the permission profile, and the limits
 
@@ -168,6 +190,27 @@ is the event log's mtime plus its last event, read from the final 4 KB — never
 
 Correct a running worker through `oc_note.sh "$RUN" <label> "..."`, which the live-notes block in
 its spec tells it to re-read.
+
+**Never sit idle while agents run.** From the first dispatch until the last review you are either
+processing a returned agent or doing work that does not depend on one — writing the next spec,
+running tests on what already merged, checking a research source. Waiting for the whole batch
+before looking at anything is correct only when the user explicitly asked for it. A regression you
+can fix now is fixed ahead of the queue, because a broken integration branch blocks every agent
+still to be merged. Pick `--timeout` as the time until your next useful action, not as how long an
+agent might take; exit 1 is an instruction to go do that work, not a reason to call again.
+
+A transport failure is not yours to decide silently. When a run dies on a provider or connection
+error, report the evidence and ask the user whether to wait for the upstream or resume the
+preserved session; the session id survives in `thread.txt`, so asking costs nothing.
+
+#### Keeping your own context small
+
+The context that needs protecting is yours. A worker's context is disposable — created for one
+task, gone with it — so let workers read whatever they need, and never split a task or shorten a
+spec to save a worker's context. Only the report is bounded, because that is the part that lands
+in you: read `result.json` and `verify.json`, use `oc_status.sh --brief` as the digest, open
+`events.jsonl` only when something failed, and refer to artifacts by path instead of quoting
+them. Summarize for the user from the diff and the check results, not from the worker's prose.
 
 ### 7. Review — the part you never delegate
 
