@@ -10,11 +10,11 @@ targets=()
 
 usage() {
   printf '%s\n' \
-    "Usage: ./install.sh [claude|codex|opencode ...] [--copy|--link]" \
+    "Usage: ./install.sh [claude|codex|opencode|omp ...] [--copy|--link]" \
     "       ./install.sh [targets ...] --status" \
     "       ./install.sh [targets ...] --uninstall" \
     "" \
-    "Default: symlink the skill for every agent that is installed on this machine."
+    "Default: symlink the skill for all four supported agents."
 }
 
 for argument in "$@"; do
@@ -24,18 +24,19 @@ for argument in "$@"; do
     --status) operation=status ;;
     --uninstall) operation=uninstall ;;
     -h|--help) usage; exit 0 ;;
-    claude|codex|opencode) targets+=("$argument") ;;
+    claude|codex|opencode|omp) targets+=("$argument") ;;
     *) printf 'Unknown argument: %s\n' "$argument" >&2; usage >&2; exit 2 ;;
   esac
 done
 
-[ "${#targets[@]}" -eq 0 ] && targets=(claude codex opencode)
+[ "${#targets[@]}" -eq 0 ] && targets=(claude codex opencode omp)
 
 skill_base() {
   case "$1" in
     claude) printf '%s\n' "${CLAUDE_HOME:-$HOME/.claude}/skills" ;;
     codex) printf '%s\n' "${CODEX_HOME:-$HOME/.codex}/skills" ;;
     opencode) printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" ;;
+    omp) printf '%s\n' "${OMP_CONFIG_DIR:-$HOME/.omp/agent}/skills" ;;
   esac
 }
 

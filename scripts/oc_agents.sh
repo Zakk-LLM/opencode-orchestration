@@ -100,8 +100,14 @@ def scan_unregistered(known):
             continue
         sub = next((a for a in argv[1:] if not a.startswith("-")), None)
         engine = os.path.basename(argv[0])
-        if not ((engine == "codex" and sub in ("exec", "e"))
-                or (engine == "opencode" and sub == "run")):
+        # Three engines share the cap: `codex exec`, `opencode run`, and `omp -p`.
+        if engine == "codex" and sub in ("exec", "e"):
+            pass
+        elif engine == "opencode" and sub == "run":
+            pass
+        elif engine == "omp" and ("-p" in argv[1:] or "--print" in argv[1:]):
+            pass
+        else:
             continue
         pid = int(entry.name)
         if state(pid) in (None, "Z") or descends_from(pid, known):
@@ -115,7 +121,7 @@ def scan_unregistered(known):
 # One machine, one quota: a sibling toolkit's agents count against the same cap.
 registries = [reg]
 runtime = reg.parent
-for name in ("codex-agents", "opencode-agents"):
+for name in ("codex-agents", "opencode-agents", "omp-agents"):
     other = runtime / name
     if other != reg and other.is_dir():
         registries.append(other)
