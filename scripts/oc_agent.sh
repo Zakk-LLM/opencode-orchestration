@@ -282,13 +282,55 @@ if [ "$ADMISSION" != off ]; then
 fi
 
 START=$(date +%s)
-# stdin must be closed: an inherited terminal stdin makes `opencode run` wait forever, exactly
-# as it does for codex. The prompt is passed as an argument, not on stdin.
-( cd "$CWD" && OPENCODE_CONFIG_CONTENT="$PERM_JSON" \
-    timeout --signal=INT --kill-after=30 "$TIMEOUT" \
-    opencode "${ARGS[@]}" "$(cat "$PROMPT_INPUT")" \
-    < /dev/null > "$OUT/events.jsonl" 2> "$OUT/stderr.log" ) &
-AGENT_PID=$!
+
+# opencode keeps its session state in SQLite, and several processes reaching it in the same
+# instant lose to "database is locked". Starts are therefore serialized machine-wide with a
+# short hold, so a fan-out ramps in rather than stampeding. The lock covers the launch only.
+STAGGER=${AGENT_START_STAGGER:-2}
+stagger_start() {
+  [ "$STAGGER" -gt 0 ] 2>/dev/null || return 0
+  mkdir -p "$SLOTS" 2>/dev/null
+  exec {sfd}>"$SLOTS/.start.lock" || return 0
+  flock "$sfd" 2>/dev/null || return 0
+  sleep "$STAGGER"
+  exec {sfd}>&-
+}
+
+# A lock error happens before the model does anything, so retrying costs nothing and repeats
+# nothing. Any run that produced real events is never retried: that would duplicate work.
+locked_without_progress() {
+  grep -qiE "database is locked|SQLITE_BUSY|database table is locked" "$OUT/stderr.log" \
+       "$OUT/events.jsonl" 2>/dev/null || return 1
+  ! grep -qE '"type":"(tool_use|text|step_finish)"' "$OUT/events.jsonl" 2>/dev/null
+}
+
+ATTEMPT=0
+MAX_ATTEMPTS=${AGENT_LOCK_RETRIES:-4}
+while :; do
+  ATTEMPT=$((ATTEMPT + 1))
+  stagger_start
+  # stdin must be closed: an inherited terminal stdin makes `opencode run` wait forever, exactly
+  # as it does for codex. The prompt is passed as an argument, not on stdin.
+  ( cd "$CWD" && OPENCODE_CONFIG_CONTENT="$PERM_JSON" \
+      timeout --signal=INT --kill-after=30 "$TIMEOUT" \
+      opencode "${ARGS[@]}" "$(cat "$PROMPT_INPUT")" \
+      < /dev/null > "$OUT/events.jsonl" 2> "$OUT/stderr.log" ) &
+  AGENT_PID=$!
+  # Only a launch that dies immediately can be a lock collision; a long run is real work.
+  sleep 2
+  if kill -0 "$AGENT_PID" 2>/dev/null; then break; fi
+  # Already finished: reap it once and remember the status, or the final wait would report 127.
+  wait "$AGENT_PID"; EARLY=$?
+  EARLY_DONE=1; EARLY_CODE=$EARLY
+  if [ "$EARLY" = 0 ] || [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ] || ! locked_without_progress; then
+    break
+  fi
+  EARLY_DONE=0
+  BACKOFF=$((ATTEMPT * ATTEMPT * 2))
+  echo "database locked on attempt $ATTEMPT/$MAX_ATTEMPTS, retrying in ${BACKOFF}s" >&2
+  cp "$OUT/stderr.log" "$OUT/stderr.attempt-$ATTEMPT.log" 2>/dev/null
+  sleep "$BACKOFF"
+done
 
 STALLED=0
 if [ "$STALL" -gt 0 ] 2>/dev/null; then
@@ -336,7 +378,7 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
 
-wait "$AGENT_PID"; CODE=$?
+if [ "${EARLY_DONE:-0}" = 1 ]; then CODE=$EARLY_CODE; else wait "$AGENT_PID"; CODE=$?; fi
 "$HERE/oc_agents.sh" --unregister "$AGENT_PID" 2>/dev/null
 [ -n "${WATCHER:-}" ] && kill "$WATCHER" 2>/dev/null
 [ -f "$OUT/.stalled" ] && { STALLED=1; rm -f "$OUT/.stalled"; }

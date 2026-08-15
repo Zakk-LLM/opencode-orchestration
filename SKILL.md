@@ -209,6 +209,10 @@ Engine-specific rules, each learned from a real failure:
 
 - Never let opencode inherit your stdin. The wrapper passes the prompt as an argument and
   redirects stdin from `/dev/null`; without that, `opencode run` waits forever with no output.
+- Starts are staggered, not simultaneous. Both engines keep session state in SQLite, so a
+  four-way launch loses to `database is locked`; the wrapper holds a machine-wide start lock for
+  `AGENT_START_STAGGER` seconds per launch and retries a lock failure with backoff, only ever
+  when the run produced no events.
 - Always wrap in `timeout`. There is no internal limit.
 - The permission profile travels in `OPENCODE_CONFIG_CONTENT`, which **merges** with the user's
   config, so the provider, models, and MCP servers stay intact while the boundary changes.
