@@ -308,3 +308,4 @@ You perform every irreversible step. Confirm with the user before anything outwa
 - [references/worktrees.md](references/worktrees.md) — isolating parallel writers, merging, cleanup
 - [references/review-gate.md](references/review-gate.md) — the anti-optimism review protocol
 - [references/troubleshooting.md](references/troubleshooting.md) — failure modes and recovery
+- [references/evidence.md](references/evidence.md) — the measurements behind these defaults
