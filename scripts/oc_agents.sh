@@ -18,7 +18,7 @@ usage() {
 Usage: oc_agents.sh [--list | --count | --prune | --slots]
 
   --list    live agents: pid, label, tier, elapsed, workspace, run directory
-  --count   number of live registered agents (for scripts)
+  --count   number of live agents (for scripts); add --engine NAME to count one engine
   --prune   drop entries whose process is gone
   --slots   free slots against OPENCODE_MAX_AGENTS (default 5)
 
@@ -50,7 +50,9 @@ PY
     rm -f "$REG/${2:?pid}.json" ;;
   --count|--list|--prune|--slots)
     ACTION=$1
-    python3 - "$REG" "$ACTION" "${AGENT_MAX_AGENTS:-${OPENCODE_MAX_AGENTS:-5}}" <<'PY'
+    ENGINE_FILTER=
+    [ "${2:-}" = "--engine" ] && ENGINE_FILTER=${3:-}
+    AGENT_ENGINE_FILTER="$ENGINE_FILTER" python3 - "$REG" "$ACTION" "${AGENT_MAX_AGENTS:-${OPENCODE_MAX_AGENTS:-5}}" <<'PY'
 import json, os, pathlib, sys, time
 reg, action, cap = pathlib.Path(sys.argv[1]), sys.argv[2], int(sys.argv[3])
 
@@ -109,6 +111,8 @@ def scan_unregistered(known):
             pass
         else:
             continue
+        if engine_filter and engine != engine_filter:
+            continue
         pid = int(entry.name)
         if state(pid) in (None, "Z") or descends_from(pid, known):
             continue
@@ -119,11 +123,17 @@ def scan_unregistered(known):
     return found
 
 # One machine, one quota: a sibling toolkit's agents count against the same cap.
-registries = [reg]
+# A filter narrows the count to one engine, which is what a per-engine cap needs.
+engine_filter = os.environ.get("AGENT_ENGINE_FILTER") or ""
+registries = [reg] if engine_filter else [reg]
 runtime = reg.parent
-for name in ("codex-agents", "opencode-agents", "omp-agents"):
+names = [f"{engine_filter}-agents"] if engine_filter else \
+        ["codex-agents", "opencode-agents", "omp-agents"]
+if engine_filter:
+    registries = []
+for name in names:
     other = runtime / name
-    if other != reg and other.is_dir():
+    if other.is_dir() and other not in registries:
         registries.append(other)
 
 live, stale = [], []

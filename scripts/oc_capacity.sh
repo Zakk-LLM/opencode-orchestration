@@ -58,8 +58,13 @@ N=$BY_CPU
 [ "$BY_MEM" -lt "$N" ] && N=$BY_MEM
 [ "$BUSY" = 1 ] && N=$(( N / 2 ))
 [ "$N" -lt 1 ] && N=1
-# Beyond a handful the API queues anyway and the event logs stop being reviewable.
-[ "$N" -gt 8 ] && N=8
+# Beyond a handful a metered API just queues, so the default ceiling is small. An engine with
+# no rate limit is bounded by the machine instead: raise AGENT_CONCURRENCY_CEILING for it.
+# Note what this number is not: your review capacity. Thirty agents can run while only three
+# can be reviewed properly, so a high ceiling belongs to uniform mechanical work whose review
+# is batched, not to work that needs a diff read each.
+CEILING=${AGENT_CONCURRENCY_CEILING:-8}
+[ "$N" -gt "$CEILING" ] && N=$CEILING
 # The global cap wins: it counts agents this session cannot see.
 [ "$N" -gt "$FREE" ] && N=$FREE
 
