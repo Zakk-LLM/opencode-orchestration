@@ -1,0 +1,36 @@
+name: gates
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # No sibling repository is checked out. The three orchestration skills share one tier
+      # ladder, and comparing across repositories looks stricter, but it pins every
+      # single-repo pull request to the other two heads and turns one ladder change into a
+      # three-repository atomic merge. What actually has to hold is that each skill states
+      # its own boundary, and the contract values live in the checker, so one repository is
+      # enough to decide it. Comparing siblings is a proxy for that sentence, and a proxy
+      # moves when the sentence moves.
+      - name: gates
+        run: sh scripts/check-all.sh 2>&1 | tee "$RUNNER_TEMP/gates.txt"; exit "${PIPESTATUS[0]}"
+
+      # check-all.sh counts "could not run" separately from "found something", and the exit
+      # code cannot express a skip. A half-covered run must not read like a full one.
+      - name: what was skipped
+        if: ${{ always() }}
+        run: grep -E 'SKIP' "$RUNNER_TEMP/gates.txt" || echo 'nothing was skipped'
+
+      - name: keep the gate output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: gates
+          path: ${{ runner.temp }}/gates.txt
+          if-no-files-found: error
+          retention-days: 14
