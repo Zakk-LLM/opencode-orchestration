@@ -57,6 +57,18 @@ ENGINES = {
     },
 }
 
+# The evidence rules a read-only worker is given. They are the same on all three engines and
+# have already drifted once: a rule was added to one sibling's template and the other two kept
+# the shorter list for a commit. Each repository asserts the whole list locally rather than
+# comparing against a sibling, which is the same reason CI checks out nothing else.
+EVIDENCE_RULES = [
+    "Every claim carries a source",
+    'Report "not found" rather than inferring',
+    "Separate what the source states from what you conclude from it",
+    "Report which document is wrong, not that they disagree",
+    "A number is a claim",
+]
+
 CELL = re.compile(r"`([^`]+)`")
 
 
@@ -192,13 +204,24 @@ def main():
             bad.append("%s does not say these profile names do not carry to the siblings; "
                        "missing: %s" % (name, needle))
 
+    tp = path.parent / "references" / "prompt-template.md"
+    try:
+        template = flat(tp.read_text(encoding="utf-8"))
+    except OSError as exc:
+        print("cannot read %s: %s" % (tp, exc), file=sys.stderr)
+        return 2
+    for rule in EVIDENCE_RULES:
+        if rule not in template:
+            bad.append("references/prompt-template.md is missing an evidence rule: %s" % rule)
+
     if bad:
         for line in bad:
             print("%s: %s" % (path, line))
         return 1
     print("%s: contract intact — %d tiers, %d access profiles, %d READMEs carry the "
-          "cross-engine note" %
-          (path, len(TIERS), len(spec["profiles"]), len(spec["readme"])))
+          "cross-engine note, %d evidence rules in the prompt template" %
+          (path, len(TIERS), len(spec["profiles"]), len(spec["readme"]),
+           len(EVIDENCE_RULES)))
     return 0
 
 

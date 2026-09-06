@@ -101,7 +101,7 @@ scripts/oc_merge.sh --run-dir "$RUN" --repo /path/to/repo --into main --check "p
 
 `sh scripts/check-all.sh` 會跑完這個倉庫能對自己做的全部檢查：tier 階梯仍投影到約定的值、
 description 寫著本引擎 read-only 的執行邊界、兩份 README 都保留「這些設定檔名稱不能沿用到
-姊妹引擎」那句話，以及每個 shell 腳本都能解析。之後的控制會在臨時副本上逐條破壞，證明這些
+姊妹引擎」那句話、工作代理的提示範本仍帶著每一條證據規則，以及每個 shell 腳本都能解析。之後的控制會在臨時副本上逐條破壞，證明這些
 檢查還會變紅。CI 跑的是同一條命令。
 
 ## 授權

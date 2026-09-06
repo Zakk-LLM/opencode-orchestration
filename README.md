@@ -129,7 +129,8 @@ the sibling skill. Read [SKILL.md](SKILL.md) for the workflow and `references/` 
 `sh scripts/check-all.sh` runs everything this repository can check about itself: the tier
 ladder still projects to the agreed values, the description states this engine's read-only
 execution boundary, both READMEs keep the note that these profile names do not carry to the
-siblings, and every shell script parses. The controls that follow break each of those on a
+siblings, the worker prompt template still carries every evidence rule, and every
+shell script parses. The controls that follow break each of those on a
 temporary copy to prove the checks can still fail. CI runs the same command.
 
 ## License

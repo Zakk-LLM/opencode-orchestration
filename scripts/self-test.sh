@@ -20,6 +20,8 @@ fresh() {
   mkdir -p "$TMP/w/scripts" || return 2
   cp SKILL.md "$TMP/w/SKILL.md" || return 2
   cp README.md README.zh-TW.md "$TMP/w/" || return 2
+  mkdir -p "$TMP/w/references" || return 2
+  cp references/prompt-template.md "$TMP/w/references/" || return 2
   cp scripts/*.sh scripts/*.py "$TMP/w/scripts/" 2>/dev/null
   [ -f install.sh ] && cp install.sh "$TMP/w/install.sh"
   return 0
@@ -98,6 +100,16 @@ open(p, "w", encoding="utf-8").write("\n".join(keep))
 PY
   expect 1 "$r without the cross-engine note" python3 scripts/check-contract.py "$ENGINE" "$TMP/w/SKILL.md"
 done
+
+# An evidence rule drops out of the worker prompt template. This happened: one sibling gained
+# a rule and the other two kept the shorter list.
+fresh || exit 2
+sed -i '/^- A number is a claim/,+2d' "$TMP/w/references/prompt-template.md"
+expect 1 "prompt template lost an evidence rule" python3 scripts/check-contract.py "$ENGINE" "$TMP/w/SKILL.md"
+
+fresh || exit 2
+rm -f "$TMP/w/references/prompt-template.md"
+expect 2 "the prompt template is missing" python3 scripts/check-contract.py "$ENGINE" "$TMP/w/SKILL.md"
 
 # Input that cannot be read is 2, not a finding.
 expect 2 "SKILL.md does not exist" python3 scripts/check-contract.py "$ENGINE" "$TMP/does-not-exist.md"

@@ -121,4 +121,12 @@ For `read-only` research agents, replace Requirements with the questions, and ad
   a URL you actually fetched.
 - Report "not found" rather than inferring. Do not fill gaps with general knowledge.
 - Separate what the source states from what you conclude from it.
+- When two documents state different numbers for the same measurement, and the thing measured
+  is reachable from your tools, measure it. Report which document is wrong, not that they
+  disagree. A contradiction you leave unresolved hands the reviewer the same work you were
+  dispatched to do, and a read-only auditor with `grep` and the repository has no excuse for
+  it. If the source is genuinely out of reach, say which command would settle it.
+- A number is a claim, and it needs the command that produced it standing next to it, in a
+  form the reviewer can re-run. `wc -c` counts bytes and `wc -m` counts characters; for CJK
+  text they differ by about two and a half times, so which one you ran is part of the number.
 ```
