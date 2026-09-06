@@ -1,6 +1,6 @@
 ---
 name: opencode
-description: Drive the opencode CLI as a fleet of worker agents while you stay the orchestrator and reviewer. Use when a task is large enough to split across parallel workers — feature implementation, refactors, bug hunts, test writing, documentation drafting, research, multi-file audits — or whenever the user asks to delegate work to opencode. You write the plan, dispatch scoped agents, supervise, review every diff yourself, and own the commit, merge, and deploy steps that workers are never allowed to touch. Sibling of the `codex` skill: same workflow, same run directory, different engine.
+description: Drive the opencode CLI as a fleet of worker agents while you stay the orchestrator and reviewer. Use when a task is large enough to split across parallel workers — feature implementation, refactors, bug hunts, test writing, documentation drafting, research, multi-file audits — or whenever the user asks to delegate work to opencode. You write the plan, dispatch scoped agents, supervise, review every diff yourself, and own the commit, merge, and deploy steps that workers are never allowed to touch. Sibling of the `codex` skill: same workflow, same run directory, different engine. opencode's `read-only` is plan mode and runs no commands; `inspect` is the profile that runs tests and linters.
 ---
 
 # opencode Orchestration

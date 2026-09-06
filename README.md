@@ -90,6 +90,10 @@ is all a strict agent needs.
 review gate compares changed files against the declared scope rather than trusting the profile.
 opencode has no sandbox, so no profile is a containment boundary.
 
+These profile names are opencode's own. `read-only` here is plan mode and runs nothing, unlike
+codex's `read-only`, which runs any command under a kernel sandbox; omp's grants no `bash` at
+all. `inspect` is this engine's answer and has no equivalent on either sibling.
+
 `bypass` prints a warning and is never a default. Named presets carry a whole role instead:
 `--agent <name>` uses an agent defined in `~/.config/opencode/agent/<name>.md`, which fixes the
 model, temperature, tools, and permissions in one place.
@@ -119,6 +123,14 @@ the sibling skill. Read [SKILL.md](SKILL.md) for the workflow and `references/` 
   arrives seconds into a paid dispatch, so `opencode models` belongs in preflight.
 - Two agents writing one checkout overwrite each other; worktrees and `PLAN.md` ownership
   prevent it.
+
+## Checks
+
+`sh scripts/check-all.sh` runs everything this repository can check about itself: the tier
+ladder still projects to the agreed values, the description states this engine's read-only
+execution boundary, both READMEs keep the note that these profile names do not carry to the
+siblings, and every shell script parses. The controls that follow break each of those on a
+temporary copy to prove the checks can still fail. CI runs the same command.
 
 ## License
 

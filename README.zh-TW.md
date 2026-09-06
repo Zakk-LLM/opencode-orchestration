@@ -74,6 +74,8 @@ scripts/oc_merge.sh --run-dir "$RUN" --repo /path/to/repo --into main --check "p
 
 `inspect` 拒絕的是 edit 工具，不是寫入：shell 命令仍可建立檔案，因此審查閘門比對實際改動檔案與宣告範圍，而不是信任設定檔。opencode 沒有沙箱，任何設定檔都不是隔離邊界。
 
+這些設定檔名稱是 opencode 自己的。這裡的 `read-only` 是 plan 模式，什麼都不執行；codex 的 `read-only` 可以在核心沙箱下執行任何命令，omp 的則連 `bash` 都沒有。`inspect` 是這個引擎的答案，兩個姊妹引擎都沒有對應設定檔。
+
 `bypass` 會印出警告，永遠不是預設值。具名預設則承載完整角色：`--agent <name>` 使用 `~/.config/opencode/agent/<name>.md` 定義的代理，把模型、溫度、可用工具與權限固定在同一處。
 
 `--network` 開放 webfetch，預設關閉；`--allow-git` 解除 git 禁令。設定檔中絕不可出現 `ask`，因為非互動執行沒有人能回答，會一直等到時限結束。權限透過 `OPENCODE_CONFIG_CONTENT` 合併進使用者設定，因此供應商、模型與 MCP 伺服器維持不變，只有這次執行的邊界改變。
@@ -94,6 +96,13 @@ scripts/oc_merge.sh --run-dir "$RUN" --repo /path/to/repo --into main --check "p
 - 沒有內建時間上限，全部呼叫以 `timeout` 包裝並先送 SIGINT。
 - 設定檔中列出的模型不代表帳號後端提供，404 會在付費派工數秒後才出現，所以 `opencode models` 屬於前置檢查。
 - 兩個代理寫入同一個工作區會互相覆蓋，以 worktree 與 `PLAN.md` 的檔案歸屬預防。
+
+## 檢查
+
+`sh scripts/check-all.sh` 會跑完這個倉庫能對自己做的全部檢查：tier 階梯仍投影到約定的值、
+description 寫著本引擎 read-only 的執行邊界、兩份 README 都保留「這些設定檔名稱不能沿用到
+姊妹引擎」那句話，以及每個 shell 腳本都能解析。之後的控制會在臨時副本上逐條破壞，證明這些
+檢查還會變紅。CI 跑的是同一條命令。
 
 ## 授權
 
