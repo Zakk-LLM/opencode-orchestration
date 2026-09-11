@@ -153,8 +153,11 @@ integration — with shared surface (build files, config, `conftest.py`) as the 
 | `cheap` | `low` | mechanical edits, renames, formatting, extraction | 300–600 |
 | `standard` | `medium` | default: a contained feature, docs, tests for one module | 900–1800 |
 | `deep` | `high` | changes across several files, non-obvious bugs, refactors | 1800–3600 |
-| `frontier` | `xhigh` | architecture, concurrency, performance, vague requirements | 3600–7200 |
-| `max` | `max` | one problem a `frontier` agent already failed twice; never a default | 7200+ |
+| `frontier` | `xhigh` | architecture, concurrency, performance, vague requirements | 3600–5400 |
+| `max` | `max` | one problem a `frontier` agent already failed twice; never a default | 5400 |
+
+**Hard ceiling: 5400 seconds (90 minutes) for any worker.** A worker still running past that is treated as suspect, non-essential work — repeated full gate runs, ablation of every hunk, a sixth version of the report — and is killed on sight, not waited for; every extra round re-reads the whole context and burns tokens by the hour. You finish from what is in its worktree: commit by theme, push, let CI be the gate. Cap the verification in the spec itself: one full gate run, two or three ablations of the hunks that matter, one report, and the sentence "do not repeat a full round".
+
 
 A tier always sets the variant, and sets the model only when `OPENCODE_TIER_<TIER>_MODEL` is
 exported. Both halves of a tier are configurable, so the ladder is data rather than code: `OPENCODE_TIER_<TIER>_MODEL` binds the model and `OPENCODE_TIER_<TIER>_VARIANT` overrides the variant. Set both in the machine-local env file and no job has to carry `--variant` by hand — a ladder that needs a flag on every dispatch is a ladder that will be forgotten on one.
