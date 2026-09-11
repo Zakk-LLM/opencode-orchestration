@@ -70,7 +70,7 @@ expect 1 "tier maps to the wrong effort" python3 scripts/check-contract.py "$ENG
 
 # A timeout drifts.
 fresh || exit 2
-sed -i 's/3600–7200/3600–9999/' "$TMP/w/SKILL.md"
+sed -i 's/3600–5400/3600–9999/' "$TMP/w/SKILL.md"
 expect 1 "timeout drift" python3 scripts/check-contract.py "$ENGINE" "$TMP/w/SKILL.md"
 
 # A whole tier disappears.

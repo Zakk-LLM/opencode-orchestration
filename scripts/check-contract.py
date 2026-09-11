@@ -26,7 +26,7 @@ TIERS = ["cheap", "standard", "deep", "frontier", "max"]
 EFFORT = {"cheap": "low", "standard": "medium", "deep": "high",
           "frontier": "xhigh", "max": "max"}
 TIMEOUT = {"cheap": "300–600", "standard": "900–1800", "deep": "1800–3600",
-           "frontier": "3600–7200", "max": "7200+"}
+           "frontier": "3600–5400", "max": "3600–5400"}
 
 # Each engine's own boundary sentence and its own profile names. Editing this is editing
 # the contract, which is the point; it is not a way around the check.
