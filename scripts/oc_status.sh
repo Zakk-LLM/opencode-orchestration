@@ -21,6 +21,35 @@ import json, pathlib, sys, time
 run = pathlib.Path(sys.argv[1])
 full = sys.argv[2] == "--full"
 brief = sys.argv[2] == "--brief"
+try:
+    watch_state = json.loads((run / ".watch-state").read_text())
+except (OSError, json.JSONDecodeError):
+    watch_state = {}
+
+def reflection_state(agent, running):
+    reports = {}
+    for path in list(agent.glob("reflect-*.json")) + list(agent.glob("reflect-*.error")):
+        try:
+            number = int(path.name.split("-", 1)[1].split(".", 1)[0])
+        except (ValueError, IndexError):
+            continue
+        if path.suffix == ".error":
+            reports[number] = "error"
+        else:
+            try:
+                reports[number] = json.loads(path.read_text())["verdict"]
+            except (OSError, KeyError, json.JSONDecodeError):
+                reports[number] = "error"
+    report_text = "reflect: " + ", ".join(f"{n} {reports[n]}" for n in sorted(reports)) \
+        if reports else ""
+    if not running:
+        return report_text
+    tools = watch_state.get(f"{agent.name}#tools")
+    reflect = watch_state.get(f"{agent.name}#reflect")
+    if not tools or not reflect:
+        return "-"
+    pending = "[pending]" if reflect.get("pending") else ""
+    return f"tools={tools.get('count', 0)} reflect={reflect.get('n', 0)}{pending}"
 agents = sorted(a for a in (run / "agents").glob("*") if a.is_dir()) \
     if (run / "agents").is_dir() else []
 if not agents:
@@ -34,7 +63,7 @@ for a in agents:
         # An agent directory with no event log was never dispatched: a prepared spec, or a job
         # the scheduler skipped because a dependency failed. That is not the same as running.
         if not (a / "events.jsonl").exists():
-            rows.append((a.name, "PENDING", "-", "-", "-", ""))
+            rows.append((a.name, "PENDING", "-", "-", "-", "", "-"))
             continue
         # While an agent runs, the useful number is how long it has before the guard kills it.
         left = "-"
@@ -44,7 +73,7 @@ for a in agents:
             left = f"{remaining}s" if remaining > 0 else "over"
         except (OSError, KeyError, json.JSONDecodeError):
             pass
-        rows.append((a.name, "RUNNING", left, "-", "-", ""))
+        rows.append((a.name, "RUNNING", left, "-", "-", "", reflection_state(a, True)))
         continue
     m = json.loads(meta_file.read_text())
     u = m.get("usage") or {}
@@ -64,17 +93,19 @@ for a in agents:
         state = "NO-RESULT"
     rows.append((a.name, state, f"{m['duration_s']}s",
                  f"{u.get('output_tokens', 0)}", m.get("thread_id") or "-",
-                 m.get("result_file") or ""))
+                 m.get("result_file") or "", reflection_state(a, False)))
 
 w = max(len(r[0]) for r in rows)
-print(f"{'AGENT'.ljust(w)}  STATE      TIME    OUT-TOK   (TIME = elapsed, or left before the guard)")
-for name, state, dur, out, _, _ in rows:
-    print(f"{name.ljust(w)}  {state:<9}  {dur:>5}  {out:>7}")
+print(f"{'AGENT'.ljust(w)}  STATE      TIME    OUT-TOK   REFLECTION   (TIME = elapsed, or left before the guard)")
+for name, state, dur, out, _, _, reflection in rows:
+    print(f"{name.ljust(w)}  {state:<9}  {dur:>5}  {out:>7}   {reflection}")
 print(f"\ntotal input {tin} / output {tout} tokens across {len(rows)} agents")
 
-for name, state, _, _, thread, path in rows:
+for name, state, _, _, thread, path, reflection in rows:
     # Thread ids share a timestamp prefix, so print them in full for --resume.
     print(f"\n--- {name} [{state}] thread {thread}")
+    if reflection.startswith("reflect:"):
+        print(reflection)
     if not path or brief:
         continue
     text = pathlib.Path(path).read_text(errors="replace").strip()

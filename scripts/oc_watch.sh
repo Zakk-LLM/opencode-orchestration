@@ -13,6 +13,8 @@ Usage: oc_watch.sh <run-dir> [--timeout SEC] [--interval SEC] [--state FILE]
                   action, not as how long the agents might take.
   --interval SEC  poll interval, default 10
   --state FILE    where the seen-set lives, default <run-dir>/.watch-state
+  --reflect-tools N  notify after N completed tools, default 100
+  --reflect-min M    notify after M elapsed minutes, default 45
   --warn PCT      warn when a running agent has used this share of its wall-clock limit,
                   default 80. Reported once per agent as "<label> EXPIRING <seconds> left".
   --peek          for each running agent, also print its last event, read from the tail of
@@ -31,11 +33,15 @@ RUN=${1:-}; shift 2>/dev/null
 case "$RUN" in -h|--help) usage; exit 0 ;; esac
 
 TIMEOUT=300; INTERVAL=10; STATE=; WARN=80; PEEK=0
+REFLECT_TOOLS=100; REFLECT_MIN=45
+HERE=$(cd "$(dirname "$0")" && pwd)
 while [ $# -gt 0 ]; do
   case "$1" in
     --timeout) TIMEOUT=$2; shift 2 ;;
     --interval) INTERVAL=$2; shift 2 ;;
     --state) STATE=$2; shift 2 ;;
+    --reflect-tools) REFLECT_TOOLS=$2; shift 2 ;;
+    --reflect-min) REFLECT_MIN=$2; shift 2 ;;
     --warn) WARN=$2; shift 2 ;;
     --peek) PEEK=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -50,8 +56,12 @@ while :; do
   # Two orchestrators watching one run must not both claim the same completion, so the
   # read-modify-write of the seen-set happens under a lock.
   OUT=$(flock "$STATE.lock" env RUN_DIR="$RUN" STATE_FILE="$STATE" WARN_PCT="$WARN" \
-        PEEK="$PEEK" python3 <<'PY'
-import json, os, pathlib, sys, time
+        PEEK="$PEEK" REFLECT_TOOLS="$REFLECT_TOOLS" REFLECT_MIN="$REFLECT_MIN" \
+        SCRIPTS_DIR="$HERE" python3 <<'PY'
+import json, os, pathlib, shlex, sys, time
+
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from oc_events import scan_tools
 
 run = pathlib.Path(os.environ["RUN_DIR"])
 state_file = pathlib.Path(os.environ["STATE_FILE"])
@@ -102,19 +112,69 @@ if not dispatched:
 
 now = time.time()
 warn_pct = int(os.environ.get("WARN_PCT", "80"))
+reflect_tools = int(os.environ["REFLECT_TOOLS"])
+reflect_seconds = int(os.environ["REFLECT_MIN"]) * 60
 changed, running, done = [], 0, 0
+count_state_changed = False
 for a in dispatched:
+    events = a / "events.jsonl"
+    try:
+        started = json.loads((a / "started.json").read_text())
+        started_at = started["started_at"]
+    except (OSError, KeyError, json.JSONDecodeError):
+        started = {}
+        started_at = None
+    tools_key = f"{a.name}#tools"
+    tools = seen.get(tools_key) or {}
+    if started_at is not None:
+        identity_changed = tools.get("started_at") != started_at
+        if identity_changed:
+            tools = {"started_at": started_at, "offset": 0, "count": 0}
+        try:
+            truncated = events.stat().st_size < int(tools.get("offset", 0))
+        except OSError:
+            truncated = False
+        if truncated:
+            tools = {"started_at": started_at, "offset": 0, "count": 0}
+        calls, offset = scan_tools(events, int(tools.get("offset", 0)))
+        updated = {"started_at": started_at, "offset": offset,
+                   "count": int(tools.get("count", 0)) + sum(c["ok"] for c in calls)}
+        if seen.get(tools_key) != updated:
+            seen[tools_key] = updated
+            count_state_changed = True
+        reflect_key = f"{a.name}#reflect"
+        reflect = seen.get(reflect_key) or {}
+        if identity_changed or not reflect:
+            reflect = {"n": int(reflect.get("n", 0)), "base_count": 0,
+                       "base_at": started_at, "pending": False}
+            seen[reflect_key] = reflect
+            count_state_changed = True
     meta = a / "meta.json"
     if not meta.exists():
         running += 1
         # A guard kill destroys the turn's work, so the warning has to arrive before it, not
         # after: an expiring agent can still be told to stop and report what it has.
-        try:
-            s = json.loads((a / "started.json").read_text())
-        except (OSError, json.JSONDecodeError):
+        s = started
+        if not s:
             continue
         left = int(s.get("deadline", 0) - now)
         limit = int(s.get("timeout_s") or 0)
+        reflect = seen[f"{a.name}#reflect"]
+        tool_due = updated["count"] - int(reflect.get("base_count", 0)) >= reflect_tools
+        time_due = now - float(reflect.get("base_at", started_at)) >= reflect_seconds
+        if (tool_due or time_due) and not reflect.get("pending") and left >= 600:
+            number = int(reflect.get("n", 0)) + 1
+            elapsed = max(0, int((now - float(reflect.get("base_at", started_at))) / 60))
+            trigger = "tools" if tool_due else "elapsed"
+            command = " ".join(shlex.quote(value) for value in
+                               (str(pathlib.Path(os.environ["SCRIPTS_DIR"]) / "oc_reflect.sh"),
+                                str(run), a.name, "--trigger", trigger,
+                                "--state", os.environ["STATE_FILE"]))
+            reflect["pending"] = True
+            seen[f"{a.name}#reflect"] = reflect
+            changed.append((a.name,
+                            f"REFLECT {number}: {updated['count']} tools, {elapsed} min elapsed "
+                            f"— {command}", "", ""))
         if limit and left <= limit * (100 - warn_pct) / 100:
             key = f"{a.name}#expiring"
             if key not in seen:
@@ -131,7 +191,6 @@ for a in dispatched:
                                 f"tool calls — interrupt it, the spec cannot fix itself", "", ""))
 
         stall = int(s.get("stall_s") or 0)
-        events = a / "events.jsonl"
         if stall and events.exists():
             quiet = int(now - events.stat().st_mtime)
             if quiet >= stall * warn_pct / 100:
@@ -200,7 +259,7 @@ if os.environ.get("PEEK") == "1":
         peeked = True
         print(f"~ {a.name}\talive {int(now - ev.stat().st_mtime)}s ago\t{line}", file=sys.stderr)
 
-if changed or peeked:
+if changed or peeked or count_state_changed:
     state_file.write_text(json.dumps(seen))
 
 # A peek line is progress information, not a state change: it must not claim exit 0, which

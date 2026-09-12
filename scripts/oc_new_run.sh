@@ -39,6 +39,7 @@ Created: $(date -Iseconds)
 Goal:
 Workspace:
 Acceptance criteria:
+Maintainer words: put verbatim corrections in $RUN/maintainer.md for reflection.
 
 ## Agents
 

@@ -27,6 +27,7 @@ Model and limits:
   --agent NAME       opencode agent preset; defaults to plan for read-only and build otherwise
   --timeout SEC      hard wall-clock limit                   (default: 1800)
   --stall SEC        kill when no event arrives for this long (default: off)
+  --max-tools N      invalidate after more than N terminal tools (default: 0, unlimited)
 
 Permissions (opencode has no sandbox; these are its equivalent):
   --permission MODE  read-only|inspect|workspace-write|full|bypass  (default: inspect)
@@ -52,7 +53,7 @@ EOF
 }
 
 RUN_DIR=; LABEL=; PROMPT_FILE=; PROMPT_TEXT=; CWD=$PWD
-VARIANT=; VARIANT_SET=0; MODEL=; AGENT=; TIMEOUT=1800; STALL=0; RESUME=; FORK=0
+VARIANT=; VARIANT_SET=0; MODEL=; AGENT=; TIMEOUT=1800; STALL=0; MAX_TOOLS=0; RESUME=; FORK=0
 SCHEMA=; TIER=; PERMISSION=inspect; NETWORK=0; ALLOW_GIT=0; ADMISSION=wait; ALLOW_CMDS=()
 WORKTREE=; WORKTREE_BASE=HEAD; ALLOW_STALE=0
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -85,6 +86,7 @@ while [ $# -gt 0 ]; do
     --agent) AGENT=$2; shift 2 ;;
     --timeout) TIMEOUT=$2; shift 2 ;;
     --stall) STALL=$2; shift 2 ;;
+    --max-tools) MAX_TOOLS=$2; shift 2 ;;
     --permission) PERMISSION=$2; shift 2 ;;
     --network) NETWORK=1; shift ;;
     --allow-git) ALLOW_GIT=1; shift ;;
@@ -127,6 +129,7 @@ case "$PERMISSION" in read-only|inspect|workspace-write|full|bypass) ;;
 [ "$PERMISSION" = bypass ] && echo "WARNING: $LABEL runs with every permission allowed" >&2
 case "$ADMISSION" in wait|refuse|off) ;; *) echo "bad --admission: $ADMISSION (wait|refuse|off)" >&2; exit 2 ;; esac
 case "$LABEL" in */*|.|..) echo "invalid label: $LABEL (no path separators)" >&2; exit 2 ;; esac
+case "$MAX_TOOLS" in *[!0-9]*|"") echo "bad --max-tools: $MAX_TOOLS" >&2; exit 2 ;; esac
 
 CWD=$(cd "$CWD" && pwd) || exit 2
 OUT="$RUN_DIR/agents/$LABEL"
@@ -355,6 +358,26 @@ if [ "$STALL" -gt 0 ] 2>/dev/null; then
   WATCHER=$!
 fi
 
+# A bounded inquiry may have no stall guard, so its tool budget needs an independent watcher.
+# The recount after exit is the hard edge when a fast run finishes before this loop observes it.
+if [ "$MAX_TOOLS" -gt 0 ] 2>/dev/null && kill -0 "$AGENT_PID" 2>/dev/null; then
+  ( while kill -0 "$AGENT_PID" 2>/dev/null; do
+      sleep 2
+      COUNT=$(PYTHONPATH="$HERE" python3 -c \
+        'from oc_events import scan_tools; import sys; print(len(scan_tools(sys.argv[1], 0)[0]))' \
+        "$OUT/events.jsonl")
+      if [ "$COUNT" -gt "$MAX_TOOLS" ]; then
+        echo "tool budget: $COUNT completions exceeds $MAX_TOOLS, interrupting" >> "$OUT/stderr.log"
+        touch "$OUT/.over-budget"
+        kill -INT "$AGENT_PID" 2>/dev/null
+        sleep 2
+        kill -KILL "$AGENT_PID" 2>/dev/null
+        exit 0
+      fi
+    done ) &
+  BUDGET_WATCHER=$!
+fi
+
 STARTED_JSON="$OUT/started.json"
 LABEL="$LABEL" CWD="$CWD" TIMEOUT="$TIMEOUT" STALL="$STALL" START="$START" PID="$AGENT_PID" \
   python3 -c 'import json, os, sys
@@ -378,6 +401,7 @@ rm -f "$REG_META"
 cleanup() {
   kill -INT "$AGENT_PID" 2>/dev/null
   [ -n "${WATCHER:-}" ] && kill "$WATCHER" 2>/dev/null
+  [ -n "${BUDGET_WATCHER:-}" ] && kill "$BUDGET_WATCHER" 2>/dev/null
   "$HERE/oc_agents.sh" --unregister "$AGENT_PID" 2>/dev/null
 }
 trap cleanup EXIT
@@ -387,18 +411,33 @@ trap 'cleanup; exit 143' TERM
 if [ "${EARLY_DONE:-0}" = 1 ]; then CODE=$EARLY_CODE; else wait "$AGENT_PID"; CODE=$?; fi
 "$HERE/oc_agents.sh" --unregister "$AGENT_PID" 2>/dev/null
 [ -n "${WATCHER:-}" ] && kill "$WATCHER" 2>/dev/null
+[ -n "${BUDGET_WATCHER:-}" ] && kill "$BUDGET_WATCHER" 2>/dev/null
+OVER_BUDGET=0
+TOOL_COMPLETIONS=$(PYTHONPATH="$HERE" python3 -c \
+  'from oc_events import scan_tools; import sys; print(len(scan_tools(sys.argv[1], 0)[0]))' \
+  "$OUT/events.jsonl")
+if [ "$MAX_TOOLS" -gt 0 ] && [ "$TOOL_COMPLETIONS" -gt "$MAX_TOOLS" ]; then
+  OVER_BUDGET=1
+  touch "$OUT/.over-budget"
+  CODE=66
+fi
 [ -f "$OUT/.stalled" ] && { STALLED=1; rm -f "$OUT/.stalled"; }
 END=$(date +%s)
 rm -f "$OUT/.prompt-with-schema.md"
 
 python3 - "$OUT" "$LABEL" "$CWD" "$VARIANT" "$PERMISSION" "$CODE" "$((END - START))" \
          "$RESUME" "$STALLED" "$WORKTREE_BRANCH" "$BASE_SHA" "$MODEL" "$BASE_REF" \
-         "${SCHEMA:-}" <<'PY'
+         "${SCHEMA:-}" "$HERE" "$OVER_BUDGET" <<'PY'
 import json, sys, pathlib
 (out, label, cwd, variant, permission, code, dur, resume, stalled, branch, base_sha,
- model, base_ref, schema) = sys.argv[1:15]
+ model, base_ref, schema, scripts, over_budget) = sys.argv[1:17]
+sys.path.insert(0, scripts)
+from oc_events import scan_tools
 out = pathlib.Path(out)
-session, usage, errors, failed_cmds, files, reconnects = None, {}, [], 0, set(), 0
+session, usage, errors, files, reconnects = None, {}, [], set(), 0
+tool_events, _ = scan_tools(out / "events.jsonl", 0)
+tool_calls = sum(event["ok"] for event in tool_events)
+failed_cmds = len(tool_events) - tool_calls
 texts = []
 for line in (out / "events.jsonl").read_text(errors="replace").splitlines():
     line = line.strip()
@@ -428,8 +467,6 @@ for line in (out / "events.jsonl").read_text(errors="replace").splitlines():
             errors.append(ev)
     elif kind == "tool_use":
         state = part.get("state") or {}
-        if state.get("status") == "error":
-            failed_cmds += 1
         inp = state.get("input") or {}
         tool = part.get("tool")
         if tool in ("edit", "write", "create"):
@@ -473,10 +510,11 @@ meta = {
     "duration_s": int(dur), "thread_id": session, "usage": usage,
     "result_file": str(result) if result.exists() else None,
     "result_bytes": result.stat().st_size if result.exists() else 0,
-    "failed_commands": failed_cmds, "files_touched": sorted(files),
+    "tool_calls": tool_calls, "failed_commands": failed_cmds, "files_touched": sorted(files),
     "errors": errors[:5], "error_count": len(errors),
     "schema_error": schema_error,
     "timed_out": code in (124, 137) and stalled != "1",
+    "over_budget": over_budget == "1",
     "stalled": stalled == "1", "reconnects": reconnects,
     "transient_failure": bool(code != 0 and reconnects and not usage),
     "worktree_branch": branch or None, "base_sha": base_sha or None, "base_ref": base_ref or None,
@@ -488,6 +526,7 @@ print(json.dumps({k: meta[k] for k in
 PY
 
 # A schema violation is a failed run even when opencode exited cleanly.
+[ "$CODE" -eq 66 ] && exit 66
 if [ -n "$SCHEMA" ] && python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("schema_error") else 1)' "$OUT/meta.json" 2>/dev/null; then
   exit 65
 fi
