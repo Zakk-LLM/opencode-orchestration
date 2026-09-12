@@ -190,6 +190,11 @@ if verdict == "ROUTE_CORRECTION":
     if not isinstance(data.get("next_step"), str) or not data["next_step"].strip():
         print("next_step is empty"); raise SystemExit(1)
     quotes = data.get("quotes")
+    # A cheap reflector wrote one quote under a singular key on its first live run. The
+    # shape is unambiguous, so it is accepted; the verbatim check below is what matters.
+    if quotes is None and isinstance(data.get("quote"), dict):
+        quotes = [data.pop("quote")]
+        data["quotes"] = quotes
     if not isinstance(quotes, list) or not quotes:
         print("quotes are empty"); raise SystemExit(1)
     source_paths = {"maintainer.md": maintainer, "prompt.md": prompt, "NOTES.md": notes}

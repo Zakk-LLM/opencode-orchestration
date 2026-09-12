@@ -13,3 +13,10 @@ non-empty `next_step` and at least one exact quote as
 `{"source":"maintainer.md|prompt.md|NOTES.md","text":"verbatim text"}`. Quote only text
 present in the named source; never paraphrase. Use `CANNOT_JUDGE` when no maintainer words
 support a route judgement.
+
+The exact shape, with no other keys:
+
+```json
+{"verdict": "NO_ISSUE | ROUTE_CORRECTION | CANNOT_JUDGE", "reason": "...",
+ "next_step": "...", "quotes": [{"source": "maintainer.md", "text": "..."}]}
+```

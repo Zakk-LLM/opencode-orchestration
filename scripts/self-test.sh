@@ -323,6 +323,15 @@ def valid_route():
     assert json.loads((run_dir / "agents/w/reflect-1.json").read_text())["trigger"] == "maintainer"
     assert (run_dir / "agents/w/NOTES.md").read_text() == "# Live notes\nNOTE SENTENCE\n"
 
+def valid_route_singular_quote():
+    value = json.dumps({"verdict": "ROUTE_CORRECTION", "reason": "A stop was bypassed.",
+        "next_step": "Stop and report.", "quote": {"source": "maintainer.md",
+        "text": "STOP HERE"}})
+    run_dir, result, _ = reflect_run("reflect-route-singular", value, trigger="maintainer")
+    assert result.returncode == 0
+    report = json.loads((run_dir / "agents/w/reflect-1.json").read_text())
+    assert report["quotes"] == [{"source": "maintainer.md", "text": "STOP HERE"}] and "quote" not in report
+
 def valid_cannot_judge():
     value = json.dumps({"verdict": "CANNOT_JUDGE", "reason": "No maintainer quote applies."})
     run_dir, result, _ = reflect_run("reflect-cannot", value)
@@ -515,6 +524,7 @@ elif phase == "budget":
 elif phase == "reflect":
     run("reflect accepts fenced NO_ISSUE", valid_no_issue)
     run("reflect accepts source-bound ROUTE_CORRECTION", valid_route)
+    run("reflect accepts a single quote under the singular key", valid_route_singular_quote)
     run("reflect accepts CANNOT_JUDGE", valid_cannot_judge)
     run("reflect rejects a missing verdict", lambda: invalid_result("missing", {}))
     run("reflect rejects an absent quote", lambda: invalid_result("badquote",
