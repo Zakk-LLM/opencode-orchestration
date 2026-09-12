@@ -109,6 +109,16 @@ for l in open(sys.argv[1]):
         print(i.get("exit_code"), i.get("command"))' <run>/agents/<label>/events.jsonl
 ```
 
+## Reflection cannot judge the route
+
+Repeated `CANNOT_JUDGE` means the inquiry lacks authoritative words. Put the maintainer's exact
+correction in `<run>/maintainer.md`; do not ask the reflector to infer it.
+
+## A reflection report is an error
+
+For `reflect-<n>.error`, read `<run>/reflect/<label>-<n>/agents/reflector/events.jsonl`.
+The failed inquiry is recorded and is never re-dispatched automatically.
+
 ## Cost control
 
 `oc_status.sh` totals the token usage per run. When output tokens run high for the value
