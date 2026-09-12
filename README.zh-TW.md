@@ -1,5 +1,7 @@
 # opencode Orchestration Skill
 
+> **已併入 dispatch。** 本 skill 併進 [dispatch](https://github.com/Zakk-LLM/dispatch)，以 `--engine opencode` 使用；新工作到那邊。本倉庫原樣保留，舊的 run 目錄仍可讀（tag `v1-standalone`）。
+
 [English](README.md) | 繁體中文
 
 整套 skill 的路由表（什麼任務讀哪份）在 [zakk-workflow 的 README](https://github.com/Zakk-LLM/zakk-workflow/blob/main/README.zh-CN.md#与其他-skill-的边界)。

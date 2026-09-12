@@ -1,5 +1,7 @@
 # opencode Orchestration Skill
 
+> **Superseded.** This skill is merged into [dispatch](https://github.com/Zakk-LLM/dispatch) as `--engine opencode`; new work goes there. This repository stays as it was so old run directories remain readable (tag `v1-standalone`).
+
 English | [繁體中文](README.zh-TW.md)
 
 The routing table for the whole skill set — which skill to read for which task — lives in [zakk-workflow's README](https://github.com/Zakk-LLM/zakk-workflow#boundaries-with-the-sibling-skills).
