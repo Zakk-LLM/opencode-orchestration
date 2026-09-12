@@ -2,6 +2,8 @@
 
 [English](README.md) | 繁體中文
 
+整套 skill 的路由表（什麼任務讀哪份）在 [zakk-workflow 的 README](https://github.com/Zakk-LLM/zakk-workflow/blob/main/README.zh-CN.md#与其他-skill-的边界)。
+
 這是把工作分派給多個 opencode 工作代理的技能，協調者保留規劃、監督、審查與部署。它與 [codex-orchestration](https://github.com/Zakk-LLM/codex-orchestration) 是同一套設計的姊妹版：相同的執行目錄、難度分級、審查閘門與原子整合，底層引擎不同。
 
 分工固定：工作代理只產出程式碼與草稿；協調者讀真實 diff、執行測試、寫審查結論；commit、merge、發佈由協調者執行。

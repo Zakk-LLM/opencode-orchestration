@@ -2,6 +2,8 @@
 
 English | [繁體中文](README.zh-TW.md)
 
+The routing table for the whole skill set — which skill to read for which task — lives in [zakk-workflow's README](https://github.com/Zakk-LLM/zakk-workflow#boundaries-with-the-sibling-skills).
+
 A skill for driving a fleet of opencode workers from an orchestrating agent that keeps planning,
 supervision, review, and shipping for itself. It is the sibling of the
 [codex-orchestration](https://github.com/Zakk-LLM/codex-orchestration) skill: same run directory,
