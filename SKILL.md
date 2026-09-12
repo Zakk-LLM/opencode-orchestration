@@ -245,17 +245,8 @@ is the event log's mtime plus its last event, read from the final 4 KB — never
 Correct a running worker through `oc_note.sh "$RUN" <label> "..."`, which the live-notes block in
 its spec tells it to re-read.
 
-When watch prints `REFLECT`, run the shown `oc_reflect.sh` command once. The inquiry has ten
-tools and at most 390 seconds including wrapper backstops; it is not progress:
-
-- `NO_ISSUE`: continue supervision.
-- `CANNOT_JUDGE`: inspect the named sources instead of re-dispatching.
-- `ROUTE_CORRECTION`: verify its exact quotes, then send only your correction with `oc_note.sh`.
-
-A direct maintainer correction requires `oc_reflect.sh <run> <label> --trigger maintainer`.
-Reflection is a reminder, not a pause: the worker keeps running and reads a correction only at
-its next live-notes checkpoint. With a custom watch `--state`, pass the same path to reflection;
-`oc_status.sh` reads only the default `<run>/.watch-state`.
+When watch prints `REFLECT`, run the shown `oc_reflect.sh` command once; it is a reminder,
+not a pause. The three verdicts and what each asks of you: [references/reflect.md](references/reflect.md).
 
 **Never sit idle while agents run.** From the first dispatch until the last review you are either
 processing a returned agent or doing work that does not depend on one — writing the next spec,
